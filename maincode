@@ -1,0 +1,176 @@
+from flask import Flask, request, jsonify
+import requests
+from collections.abc import Sequence
+# from collections import defaultdict 
+
+app = Flask(__name__)
+
+# Initialize the database with seed data
+@app.route('/init-db', methods=['GET'])
+def init_db():
+    cnx = mysql.connector.connect(user='myuser', password='mypassword', host='localhost', database='mydatabase')
+    cursor = cnx.cursor()
+    url = 'https://s3.amazonaws.com/roxiler.com/product_transaction.json'
+    response = requests.get(url)
+    data = response.json()
+
+    # Define the table structure
+    ProductTransaction = namedtuple('ProductTransaction', ['id', 'title', 'category', 'price','description', 'dateOfSale','image','sold'])
+#     table_name = 'product_transactions'
+#     columns = ['id', 'title', 'category', 'price','description', 'dateOfSale','image','sold']
+#     create_table_query = 'CREATE TABLE IF NOT EXISTS ' + table_name + ' (' + ', '.join(['`' + col + '` ' + 'VARCHAR(255)' for col in columns]) + ')'
+#     cursor.execute(create_table_query)
+#     insert_query = 'INSERT INTO ' + table_name + ' (' + ', '.join(columns) + ') VALUES (%s, %s, %s, %s, %s)'
+#     for d in data:
+#         cursor.execute(insert_query, (d['id'], d['title'], d['category'], d['price'], d['description'],d['image'],d['sold'],d['dateOfSale']))
+#     cnx.commit()
+#     cursor.close()
+#     cnx.close()
+
+
+    # Initialize the database
+    transactions = []
+    for d in data:
+        transactions.append(ProductTransaction(d['id'], d['title'], d['category'], d['price'], d['description'],d['image'],d['sold'],d['dateOfSale'],))
+
+    # Save the transactions to the database
+    # (assuming we have a database connection and a save method defined)
+    # db.save_all(transactions)
+
+    return jsonify({'message': 'Database initialized with seed data.'})
+
+# List all product transactions with search and pagination
+@app.route('/transactions', methods=['GET'])
+def list_transactions():
+    month = request.args.get('month')
+    search = request.args.get('search')
+    page = int(request.args.get('page', 1))
+    per_page = int(request.args.get('per_page', 10))
+
+    url = f'https://s3.amazonaws.com/roxiler.com/product_transaction.json?month={month}'
+    response = requests.get(url)
+    data = response.json()
+
+    transactions = []
+    for d in data:
+        if search:
+            if search.lower() in d['productId'].lower() or search.lower() in d['category'].lower() or str(d['price']) == search or d['dateOfSale'].lower().find(search.lower()) != -1:
+                transactions.append(d)
+        else:
+            transactions.append(d)
+
+    total_transactions = len(transactions)
+    transactions = transactions[(page-1)*per_page:page*per_page]
+
+    return jsonify({
+        'transactions': transactions,
+        'pagination': {
+            'page': page,
+            'per_page': per_page,
+            'total_pages': (total_transactions-1) // per_page + 1,
+            'total_transactions': total_transactions
+        }
+    })
+
+# Get statistics for the selected month
+@app.route('/statistics', methods=['GET'])
+def get_statistics():
+    month = request.args.get('month')
+
+    url = f'https://s3.amazonaws.com/roxiler.com/product_transaction.json?month={month}'
+    response = requests.get(url)
+    data = response.json()
+
+    total_sale_amount = 0
+    total_sold_items = 0
+    total_not_sold_items = 0
+
+    for d in data:
+        if d['price'] > 0:
+            total_sale_amount += d['price']
+            total_sold_items += 1
+        else:
+            total_not_sold_items += 1
+
+    return jsonify({
+        'total_sale_amount': total_sale_amount,
+        'total_sold_items': total_sold_items,
+        'total_not_sold_items': total_not_sold_items
+    })
+
+# Get data for the bar chart
+@app.route('/bar-chart', methods=['GET'])
+def get_pie_chart():
+    month = request.args.get('month')
+
+    url = f'https://s3.amazonaws.com/roxiler.com/product_transaction.json?month={month}'
+    response =requests.get(url)
+    data = response.json()
+
+    categories = defaultdict(int)
+    for d in data:
+        categories[d['category']] += 1
+
+    return jsonify({'categories': dict(categories)})
+
+# Get combined data from all the above APIs
+@app.route('/combined', methods=['GET'])
+def get_combined():
+    month = request.args.get('month')
+
+    url = f'https://s3.amazonaws.com/roxiler.com/product_transaction.json?month={month}'
+    response = requests.get(url)
+    data = response.json()
+
+    # Calculate statistics
+    total_sale_amount = 0
+    total_sold_items = 0
+    total_not_sold_items = 0
+    for d in data:
+        if d['price'] > 0:
+            total_sale_amount += d['price']
+            total_sold_items += 1
+        else:
+            total_not_sold_items += 1
+
+    # Group transactions by price range
+    price_ranges = defaultdict(list)
+    for d in data:
+        if d['price'] <= 100:
+            price_ranges['0-100'].append(d)
+        elif d['price'] <= 200:
+            price_ranges['101-200'].append(d)
+        elif d['price'] <= 300:
+            price_ranges['201-300'].append(d)
+        elif d['price'] <= 400:
+            price_ranges['301-400'].append(d)
+        elif d['price'] <= 500:
+            price_ranges['401-500'].append(d)
+        elif d['price'] <= 600:
+            price_ranges['501-600'].append(d)
+        elif d['price'] <= 700:
+            price_ranges['601-700'].append(d)
+        elif d['price'] <= 800:
+            price_ranges['701-800'].append(d)
+        elif d['price'] <= 900:
+            price_ranges['801-900'].append(d)
+        else:
+            price_ranges['901-above'].append(d)
+
+    # Group transactions by category
+    categories = dict(list)
+    for d in data:
+        categories[d['category']].append(d)
+
+    return jsonify({
+        'statistics': {
+            'total_sale_amount': total_sale_amount,
+            'total_sold_items': total_sold_items,
+            'total_not_sold_items': total_not_sold_items
+        },
+        'price_ranges': dict(price_ranges),
+        'categories': dict(categories)
+    })
+
+if __name__ == '__main__':
+    app.run(debug=True)
